@@ -21,11 +21,17 @@ def _fillVector(input, segments):
 def init_node ():
     rospy.init_node('planning_request_adapter')
 
+def _setGaussianShooter (hpp, q, dev):
+    hpp.robot.setCurrentConfig (q)
+    hpp.problem.setParameter ("ConfigurationShooter/Gaussian/standardDeviation",
+            CORBA.Any(CORBA.TC_double, dev))
+    hpp.problem.selectConfigurationShooter ("Gaussian")
 
 class PlanningRequestAdapter(HppClient):
     subscribersDict = {
             "motion_planning": {
                 "set_goal" : [PlanningGoal, "set_goal" ],
+                "estimate" : [Empty, "estimate" ],
                 "request" : [Empty, "request" ],
                 "param" : {
                     'init_position_mode': [ String, "init_position_mode" ],
@@ -38,7 +44,7 @@ class PlanningRequestAdapter(HppClient):
                 "problem_solved" : [ ProblemSolved, 1],
                 },
             }
-    modes = [ "current", "user_defined" ]
+    modes = [ "current", "estimated", "user_defined" ]
 
     def __init__ (self, topicStateFeedback):
         super(PlanningRequestAdapter, self).__init__ ()
@@ -81,6 +87,23 @@ class PlanningRequestAdapter(HppClient):
                 hpp.robot.setJointConfig(jn, [q])
         return hpp.robot.getCurrentConfig()
 
+    def _estimate (self, hpp, qsensor, dev):
+        """
+        Generate a configuration that make 'sense':
+        - no collisions (between objects, robots and world)
+        - the current constraints are satisfied
+        """
+        _setGaussianShooter (hpp, qsensor, stddev)
+        qsemantic = qsensor[:]
+        while True:
+            valid, qsemantic, err = hpp.problem.applyConstraints (qsemantic)
+            if valid:
+                valid, msg = hpp.robot.isConfigValid (qsemantic)
+                if valid: break
+            qsemantic = hpp.robot.shootRandomConfig()
+
+        return qsemantic
+
     def set_goal (self, msg):
         hpp = self._hpp()
         q_goal = self._JointStateToConfig(msg.base_placement, msg.joint_state)
@@ -92,6 +115,8 @@ class PlanningRequestAdapter(HppClient):
         try:
             if self.init_mode == "current":
                 self.set_init_pose (PlanningGoal(self.last_placement, self.last_joint_state))
+            elif self.init_mode == "estimated":
+                self.q_init = self.estimated_config
             hpp = self._hpp()
             hpp.problem.setInitialConfig(self.q_init)
             t = hpp.problem.solve()
@@ -113,12 +138,41 @@ class PlanningRequestAdapter(HppClient):
         finally:
             self.mutexSolve.release()
 
+    def estimate (self, msg):
+        hpp = self._hpp()
+        self.mutexSolve.acquire()
+        try:
+            stddev = rospy.get_param ("estimation/std_dev")
+            qsensor = self._JointStateToConfig (self.last_placement, self.last_joint_state)
+            hpp.problem.selectProblem("estimation")
+            qsemantic = self._estimation (hpp, qsensor, stddev)
+
+            hpp.problem.selectProblem("default")
+            self.estimated_config = self._estimation (hpp, qsemantic, stddev)
+
+            hpp.problem.selectProblem("estimation")
+            hpp.problem.setInitialConfig (qsemantic)
+            hpp.problem.resetGoalConfigs ()
+            hpp.problem.addGoalConfig(self.estimated_config)
+            t = hpp.problem.solve()
+            pid = hpp.problem.numberPaths() - 1
+            time = t[0] * 3600 + t[1] * 60 + t[2] + t[3] * 1e-3
+            rospy.loginfo("Path ({}) to reach target found in {} seconds".format(pid, t))
+            self.publishers["/motion_planning/problem_solved"].publish (ProblemSolved(True, "success", pid))
+        except Exception as e:
+            rospy.loginfo (str(e))
+            rospy.sleep(0.1)
+            self.publishers["/motion_planning/problem_solved"].publish (ProblemSolved(False, str(e), -1))
+        finally:
+            hpp.problem.selectProblem("default")
+            self.mutexSolve.release()
+
     def init_position_mode(self, msg):
         if msg.data in self.modes:
             if msg.data == self.init_mode: return
             self.init_mode = msg.data
             rospy.loginfo("Initial position mode: %s" % msg.data)
-            if msg.data == "current":
+            if msg.data == "current" or msg.data == "estimated":
                 self.get_current_state = rospy.Subscriber (self.topicStateFeedback, JointState, self.get_joint_state)
             else:
                 self.get_current_state = None
