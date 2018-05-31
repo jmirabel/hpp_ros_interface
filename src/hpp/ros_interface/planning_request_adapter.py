@@ -10,6 +10,7 @@ from std_msgs.msg import String, Empty, Bool
 from math import cos, sin
 from threading import Lock
 from omniORB import CORBA
+import traceback
 
 def _fillVector(input, segments):
     """ Returns a vector that contains the segments extracted from input """
@@ -51,19 +52,20 @@ class PlanningRequestAdapter(HppClient):
         self.get_current_state = None
         self.tfListener = TransformListener()
         self.mutexSolve = Lock()
-        self.world_frame = "/world"
+        self.world_frame = "world"
+        self.robot_name = "talos/"
         self.robot_base_frame = None
 
     def _hpp (self, reconnect = True):
         hpp = super(PlanningRequestAdapter, self)._hpp(reconnect)
-        self.robot_base_frame = hpp.robot.getLinkNames("root_joint")[0]
-        rootJointType = rospy.get_param ("robot_root_joint_type", "anchor")
+        self.robot_base_frame = hpp.robot.getLinkNames(self.robot_name + "root_joint")[0]
+        rootJointType = rospy.get_param ("robot_root_joint_type", "freeflyer")
         if rootJointType == "anchor":
             self.setRootJointConfig = lambda x : None
         elif rootJointType == "freeflyer":
-            self.setRootJointConfig = lambda x : hpp.robot.setJointConfig("root_joint", x)
+            self.setRootJointConfig = lambda x : hpp.robot.setJointConfig(self.robot_name + "root_joint", x)
         elif rootJointType == "planar":
-            self.setRootJointConfig = lambda x : hpp.robot.setJointConfig("root_joint", x[0:2] + [x[6]**2 - x[5]**2, 2 * x[5] * x[6]] )
+            self.setRootJointConfig = lambda x : hpp.robot.setJointConfig(self.robot_name + "root_joint", x[0:2] + [x[6]**2 - x[5]**2, 2 * x[5] * x[6]] )
         else:
             self.setRootJointConfig = lambda x : (_ for _ in ()).throw(Exception("parameter robot_root_joint_type must be one of (anchor, freeflyer, anchor) and not " + str(rootJointType)))
         return hpp
@@ -74,11 +76,11 @@ class PlanningRequestAdapter(HppClient):
             hpp.robot.setCurrentConfig(self.q_init)
         self.setRootJointConfig(placement)
         for jn, q in zip(js_msg.name, js_msg.position):
-            size = hpp.robot.getJointConfigSize(jn)
+            size = hpp.robot.getJointConfigSize(self.robot_name + jn)
             if size == 2:
-                hpp.robot.setJointConfig(jn, [cos(q), sin(q)])
+                hpp.robot.setJointConfig(self.robot_name + jn, [cos(q), sin(q)])
             else:
-                hpp.robot.setJointConfig(jn, [q])
+                hpp.robot.setJointConfig(self.robot_name + jn, [q])
         return hpp.robot.getCurrentConfig()
 
     def set_goal (self, msg):
@@ -93,14 +95,18 @@ class PlanningRequestAdapter(HppClient):
             if self.init_mode == "current":
                 self.set_init_pose (PlanningGoal(self.last_placement, self.last_joint_state))
             hpp = self._hpp()
+            rospy.loginfo("init done")
+            rospy.loginfo(str(self.q_init))
             hpp.problem.setInitialConfig(self.q_init)
+            rospy.loginfo("configured")
             t = hpp.problem.solve()
+            rospy.loginfo("solved")
             pid = hpp.problem.numberPaths() - 1
             time = t[0] * 3600 + t[1] * 60 + t[2] + t[3] * 1e-3
             # print "Solved in", t, ", path id", pid
             rospy.loginfo("Path ({}) to reach target found in {} seconds".format(pid, t))
             rospy.sleep(0.1)
-            self.publishers["/motion_planning/problem_solved"].publish (ProblemSolved(True, "success", pid))
+            self.publishers["motion_planning"]["problem_solved"].publish (ProblemSolved(True, "success", pid))
             if rospy.get_param("/hpp/publish_path", True):
                 topic = rospy.get_param("/hpp/topic_robot_controller", "joint_path_command")
                 rospy.loginfo("Publish path to " + str(topic))
@@ -108,8 +114,9 @@ class PlanningRequestAdapter(HppClient):
                 jpc.publish(pid)
         except Exception as e:
             rospy.loginfo (str(e))
+            rospy.loginfo (traceback.format_exc())
             rospy.sleep(0.1)
-            self.publishers["/motion_planning/problem_solved"].publish (ProblemSolved(False, str(e), -1))
+            self.publishers["motion_planning"]["problem_solved"].publish (ProblemSolved(False, str(e), -1))
         finally:
             self.mutexSolve.release()
 
@@ -126,11 +133,30 @@ class PlanningRequestAdapter(HppClient):
     def get_joint_state (self, msg):
         self.last_joint_state = msg
         try:
-            base = self.hpp.robot.getLinkNames("root_joint")[0]
+            base = "base_link"
             p, q = self.tfListener.lookupTransform(self.world_frame, base, rospy.Time(0))
             self.last_placement = p + q
-        except:
+        except Exception as e:
+            print "non"
+            rospy.loginfo( str(e) )
             pass
 
     def set_init_pose(self, msg):
-        self.q_init = self._JointStateToConfig(msg.base_placement, msg.joint_state)
+        self._JointStateToConfig(msg.base_placement, msg.joint_state)
+        self.q_init = self.get_object_root_joints()
+        # TODO: WHEN NEEDED Get the joint states of the objects.
+
+    def get_object_root_joints(self):
+        hpp = self._hpp()
+        # Get the name of the objects required by HPP
+        root_joints = [el for el in hpp.robot.getAllJointNames() if "root_joint" in el]
+        root_joints = [el.split("/")[0] for el in root_joints if not self.robot_name in el]
+
+        for obj in root_joints:
+            if self.tfListener.frameExists(obj):
+                p, q = self.tfListener.lookupTransform(self.world_frame, obj, rospy.Time(0))
+                hpp.robot.setJointConfig(obj + "/root_joint", p + q)
+            else:
+                print obj + " is not published on the TF tree but is needed to plan the trajectory of the robot."
+
+        return hpp.robot.getCurrentConfig()
