@@ -1,19 +1,20 @@
 from hpp.ros_interface.planning_request_adapter import PlanningRequestAdapter as Parent
 
 class PlanningRequestAdapter (Parent):
-    subscribersDict = {
+    servicesDict = {
             "motion_planning": {
-                "set_goal" : [PlanningGoal, "set_goal" ],
-                "request" : [Empty, "request" ],
                 "manipulation" : {
-                    'init_position_mode': [ String, "init_position_mode" ],
-                    'set_init_pose': [ PlanningGoal, "set_init_pose" ],
+                    'set_robot_prefix': [ SetString, "set_robot_prefix" ],
                     },
                 },
             }
 
     def __init__ (self, topicStateFeedback):
         super(PlanningRequestAdapter, self).__init__(topicStateFeedback)
+
+    def set_robot_prefix (self, req)
+        self.robot_name = req.value
+        return SetStringResponse(True)
 
     def _stateEstimation (self, hpp, manip, qsensor, dev):
         #TODO find the closest state ? (the one with lower error)
@@ -40,3 +41,22 @@ class PlanningRequestAdapter (Parent):
             qsemantic = hpp.robot.shootRandomConfig()
 
         return qsemantic
+
+    def _set_init_pose (self, msg)
+        self.q_init = self.get_object_root_joints()
+        # TODO: WHEN NEEDED Get the joint states of the objects.
+
+    def get_object_root_joints(self):
+        hpp = self._hpp()
+        # Get the name of the objects required by HPP
+        root_joints = [el for el in hpp.robot.getAllJointNames() if "root_joint" in el]
+        root_joints = [el.split("/")[0] for el in root_joints if not self.robot_name in el]
+
+        for obj in root_joints:
+            if self.tfListener.frameExists(obj):
+                p, q = self.tfListener.lookupTransform(self.world_frame, obj, rospy.Time(0))
+                hpp.robot.setJointConfig(obj + "/root_joint", p + q)
+            else:
+                print obj + " is not published on the TF tree but is needed to plan the trajectory of the robot."
+
+        return hpp.robot.getCurrentConfig()
