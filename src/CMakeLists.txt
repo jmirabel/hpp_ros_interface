@@ -12,6 +12,7 @@ ENDFOREACH()
 
 SET (PYTHON_FILE
     hpp_server_initializer.py
+    planning_request_adapter.py
     __init__.py)
 
 FOREACH(F ${PYTHON_FILE})

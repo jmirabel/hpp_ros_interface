@@ -1,4 +1,5 @@
 from hpp.ros_interface.planning_request_adapter import PlanningRequestAdapter as Parent
+from sot_hpp_msgs.srv import SetString
 
 class PlanningRequestAdapter (Parent):
     servicesDict = {
@@ -12,7 +13,7 @@ class PlanningRequestAdapter (Parent):
     def __init__ (self, topicStateFeedback):
         super(PlanningRequestAdapter, self).__init__(topicStateFeedback)
 
-    def set_robot_prefix (self, req)
+    def set_robot_prefix (self, req):
         self.robot_name = req.value
         return SetStringResponse(True)
 
@@ -42,7 +43,7 @@ class PlanningRequestAdapter (Parent):
 
         return qsemantic
 
-    def _set_init_pose (self, msg)
+    def _set_init_pose (self, msg):
         self.q_init = self.get_object_root_joints()
         # TODO: WHEN NEEDED Get the joint states of the objects.
 
