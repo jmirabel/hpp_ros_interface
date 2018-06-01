@@ -1,4 +1,5 @@
-from hpp.ros_interface.planning_request_adapter import PlanningRequestAdapter as Parent
+import rospy
+from hpp.ros_interface.planning_request_adapter import PlanningRequestAdapter as Parent, _setGaussianShooter
 from sot_hpp_msgs.srv import SetString
 
 class PlanningRequestAdapter (Parent):
@@ -19,23 +20,31 @@ class PlanningRequestAdapter (Parent):
 
     def _stateEstimation (self, hpp, manip, qsensor, dev):
         #TODO find the closest state ? (the one with lower error)
-        selectedProblem = hpp.problem.getSelected("problem")
+        selectedProblem = hpp.problem.getSelected("problem")[0]
         stateId = rospy.get_param("estimation/state/"+selectedProblem)
         return stateId
 
-    def _estimation (self, hpp, qsensor, dev):
+    def _transitionEstimation (self, hpp, manip, qsensor, dev):
+        #TODO find the closest state ? (the one with lower error)
+        selectedProblem = hpp.problem.getSelected("problem")[0]
+        transitionId = rospy.get_param("estimation/transition/"+selectedProblem)
+        return transitionId
+
+    def _estimation (self, hpp, qsensor, stddev, transition=False):
         """
         Generate a configuration that make 'sense':
         - no collisions (between objects, robots and world)
         - the current constraints are satisfied
         """
         manip = self._manip ()
-        stateId = self._stateEstimation (hpp, manip, qsensor, dev)
+        if transition: tid = self._transitionEstimation (hpp, manip, qsensor, stddev)
+        else:          stateId = self._stateEstimation (hpp, manip, qsensor, stddev)
 
         _setGaussianShooter (hpp, qsensor, stddev)
         qsemantic = qsensor[:]
         while True:
-            valid, qsemantic, err = manip.problem.applyConstraints (stateid, qsemantic)
+            if transition: valid, qsemantic, err = manip.problem.applyConstraintsWithOffset (tid, qsensor, qsemantic)
+            else:          valid, qsemantic, err = manip.problem.applyConstraints (stateId, qsemantic)
             if valid:
                 valid, msg = hpp.robot.isConfigValid (qsemantic)
                 if valid: break
