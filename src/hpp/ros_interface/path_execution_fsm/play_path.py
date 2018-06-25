@@ -83,6 +83,11 @@ class PlayPath (smach.State):
                 'clear_queues': [ std_srvs.srv.Trigger, ],
                 'read_queue': [ SetInt, ],
                 'stop_reading_queue': [ std_srvs.srv.Empty, ],
+                },
+            'hpp': {
+                'target': {
+                    'publish_first': [ std_srvs.srv.Empty, ],
+                    }
                 }
             }
 
@@ -122,6 +127,7 @@ class PlayPath (smach.State):
 
         # TODO Check that there the current SOT and the future SOT are compatible ?
         rospy.loginfo("Run pre-action")
+        self.serviceProxies["hpp"]["target"]["publish_first"]()
         status = self.serviceProxies['sot']['run_pre_action'](userdata.transitionId[0], userdata.transitionId[1])
 
         rospy.sleep(0.5)
