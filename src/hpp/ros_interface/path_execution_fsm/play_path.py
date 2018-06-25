@@ -8,12 +8,13 @@ from hpp.ros_interface import ros_tools
 
 _outcomes = ["succeeded", "aborted", "preempted"]
 
-def wait_if_step_by_step(msg, time=3):
-    if rospy.get_param ("/sm_sot_hpp/step_by_step", False):
+def wait_if_step_by_step(msg, level, time=0.1):
+    l = rospy.get_param ("/sm_sot_hpp/step_by_step", 0)
+    if type(l)==bool: l = 10 if l else 0
+    if level < l:
         rospy.loginfo(msg + " Wait for message on /sm_sot_hpp/step.")
         rospy.wait_for_message ("/sm_sot_hpp/step", Empty)
         rospy.sleep(time)
-
 
 class InitializePath(smach.State):
     hppTargetPubDict = {
@@ -50,7 +51,7 @@ class InitializePath(smach.State):
         userdata.transitionId = transitionId
         userdata.endStateId   = userdata.endStateIds[userdata.currentSection]
 
-        wait_if_step_by_step ("Preparing to read subpath.")
+        wait_if_step_by_step ("Preparing to read subpath.", 3)
 
         self.hppclient.manip.graph.selectGraph (transitionId[1])
         self.targetPub["read_subpath"].publish (ReadSubPath (userdata.pathId, start, length))
@@ -117,7 +118,7 @@ class PlayPath (smach.State):
     def execute(self, userdata):
         rate = rospy.Rate (1000)
 
-        wait_if_step_by_step ("Beginning execution.")
+        wait_if_step_by_step ("Beginning execution.", 3)
 
         # TODO Check that there the current SOT and the future SOT are compatible ?
         rospy.loginfo("Run pre-action")
@@ -128,7 +129,7 @@ class PlayPath (smach.State):
         while not self.control_norm_ok:
             rate.sleep()
 
-        wait_if_step_by_step ("Pre-action ended.")
+        wait_if_step_by_step ("Pre-action ended.", 2)
 
         rospy.loginfo("Publishing path")
         self.done = False
@@ -168,7 +169,7 @@ class PlayPath (smach.State):
             rate.sleep()
         self.serviceProxies['sot']['stop_reading_queue']()
         
-        wait_if_step_by_step ("Action ended.")
+        wait_if_step_by_step ("Action ended.", 2)
 
         # Run post action if any
         rospy.loginfo("Run post-action")
@@ -179,7 +180,7 @@ class PlayPath (smach.State):
         while not self.control_norm_ok:
             rate.sleep()
 
-        wait_if_step_by_step ("Post-action ended.")
+        wait_if_step_by_step ("Post-action ended.", 2)
 
         return _outcomes[0]
 
