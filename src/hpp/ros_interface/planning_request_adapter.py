@@ -61,7 +61,8 @@ class PlanningRequestAdapter(HppClient):
         self.get_current_state = None
         self.tfListener = TransformListener()
         self.mutexSolve = Lock()
-        self.world_frame = "world"
+        if not rospy.has_param ("/motion_planning/tf/world_frame_name"):
+            rospy.set_param ("/motion_planning/tf/world_frame_name", "world")
         self.robot_name = ""
         self.robot_base_frame = None
 
@@ -200,8 +201,9 @@ class PlanningRequestAdapter(HppClient):
     def get_joint_state (self, msg):
         self.last_joint_state = msg
         try:
+            world_frame = rospy.get_param ("/motion_planning/tf/world_frame_name")
             base = "base_link"
-            p, q = self.tfListener.lookupTransform(self.world_frame, base, rospy.Time(0))
+            p, q = self.tfListener.lookupTransform(world_frame, base, rospy.Time(0))
             self.last_placement = p + q
         except Exception as e:
             print "non"

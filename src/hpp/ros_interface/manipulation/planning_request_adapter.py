@@ -57,6 +57,7 @@ class PlanningRequestAdapter (Parent):
         # TODO: WHEN NEEDED Get the joint states of the objects.
 
     def get_object_root_joints(self):
+        world_frame = rospy.get_param ("/motion_planning/tf/world_frame_name")
         hpp = self._hpp()
         # Get the name of the objects required by HPP
         root_joints = [el for el in hpp.robot.getAllJointNames() if "root_joint" in el]
@@ -64,7 +65,7 @@ class PlanningRequestAdapter (Parent):
 
         for obj in root_joints:
             if self.tfListener.frameExists(obj):
-                p, q = self.tfListener.lookupTransform(self.world_frame, obj, rospy.Time(0))
+                p, q = self.tfListener.lookupTransform(world_frame, obj, rospy.Time(0))
                 hpp.robot.setJointConfig(obj + "/root_joint", p + q)
             else:
                 print obj + " is not published on the TF tree but is needed to plan the trajectory of the robot."
