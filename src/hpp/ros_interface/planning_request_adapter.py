@@ -157,15 +157,20 @@ class PlanningRequestAdapter(HppClient):
     def estimate (self, msg):
         hpp = self._hpp()
         self.mutexSolve.acquire()
+        previousConfigShooter = hpp.problem.getSelected("configurationshooter")
         try:
             if "estimation" not in hpp.problem.getAvailable("problem"):
                 raise Error("No 'estimation' problem in HPP server.")
             stddev = rospy.get_param ("estimation/std_dev")
-            qsensor = self._JointStateToConfig (self.last_placement, self.last_joint_state)
+            self.set_init_pose (PlanningGoal(self.last_placement, self.last_joint_state))
+            qsensor = self.q_init
+
+            # For instance, correct position of objects or foot
             hpp.problem.selectProblem("estimation")
             qsemantic = self._estimation (hpp, qsensor, stddev)
             self.publishers["motion_planning"]["semantic_estimation"].publish (Vector(qsemantic))
 
+            # For instance, ensure balance and/or gaze constraints.
             hpp.problem.selectProblem("default")
             self.estimated_config = self._estimation (hpp, qsemantic, stddev, transition=True)
             self.publishers["motion_planning"]["estimation"].publish (Vector(self.estimated_config))
@@ -186,6 +191,7 @@ class PlanningRequestAdapter(HppClient):
             self.publishers["motion_planning"]["problem_solved"].publish (ProblemSolved(False, str(e), -1))
         finally:
             hpp.problem.selectProblem("default")
+            hpp.problem.selectConfigurationShooter(previousConfigShooter)
             self.mutexSolve.release()
 
     def init_position_mode(self, msg):
@@ -196,6 +202,8 @@ class PlanningRequestAdapter(HppClient):
             if msg.data == "current" or msg.data == "estimated":
                 self.get_current_state = rospy.Subscriber (self.topicStateFeedback, JointState, self.get_joint_state)
             else:
+                if self.get_current_state is not None:
+                    self.get_current_state.unregister()
                 self.get_current_state = None
 
     def get_joint_state (self, msg):
