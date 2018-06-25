@@ -128,6 +128,8 @@ class HppOutputQueue(HppClient):
                     "add_operational_frame": [ SetString, "addOperationalFrame", ],
                     "add_center_of_mass_velocity": [ SetString, "addCenterOfMassVelocity", ],
                     "add_operational_frame_velocity": [ SetString, "addOperationalFrameVelocity", ],
+
+                    "publish_first": [ std_srvs.srv.Empty, "publishFirst", ],
                     }
                 }
             }
@@ -177,10 +179,11 @@ class HppOutputQueue(HppClient):
 
         self.setJointNames (SetJointNamesRequest(self._hpp().robot.getJointNames()))
 
-        self.subscribers = self._createTopics ("", self.subscribersDict, True)
-        self.services = self._createServices ("", self.servicesDict, True)
+        self.subscribers = ros_tools.createTopics (self, "", self.subscribersDict, True)
+        self.services = ros_tools.createServices (self, "", self.servicesDict, True)
         self.pubs = ros_tools.createTopics(self, "/hpp/target", self.publishersDist, subscribe = False)
         self.reading = False
+        self.firstMsgs = None
 
         self.resetTopics ()
 
@@ -333,6 +336,7 @@ class HppOutputQueue(HppClient):
         for topic in self.topics:
             msgs.append (topic.read(hpp))
         self.queue.put (msgs, True)
+        return msgs
 
     def publishNext (self):
         msgs = self.queue.get(True)
@@ -365,8 +369,10 @@ class HppOutputQueue(HppClient):
         if hasattr(self, "viewer"):
             for i in range(0,len(updateViewer), Nv): updateViewer[i] = True
             updateViewer[-1] = True
+        self.firstMsgs = None
         for t, uv in zip(times, updateViewer):
-            self.readAt(pathId, t, uv, timeShift = start)
+            msgs = self.readAt(pathId, t, uv, timeShift = start)
+            if self.firstMsgs is not None: self.firstMsgs = msgs
         self.pubs["read_path_done"].publish(UInt32(pathId))
         rospy.loginfo("Finish reading path {}".format(pathId))
         self.reading = False
@@ -379,6 +385,13 @@ class HppOutputQueue(HppClient):
 
     def readSub (self, msg):
         self._read (msg.id, msg.start, msg.length)
+
+    def publishFirst(self, empty):
+        if self.firstMsgs is not None:
+            for topic, msg in zip(self.topics, self.firstMsgs):
+                topic.publish (msg)
+            self.firstMsgs = None
+        return std_srvs.srv.EmptyResponse()
 
     def publish(self, empty):
         import time
