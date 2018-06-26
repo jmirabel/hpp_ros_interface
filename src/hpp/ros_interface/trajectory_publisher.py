@@ -226,21 +226,57 @@ class HppOutputQueue(HppClient):
         rospy.loginfo("Add topic " + n)
         return SetStringResponse(True)
 
+    def _getFrameType (self, n):
+        _hpp = self._hpp()
+        jointNames = _hpp.robot.getAllJointNames()
+        if n in jointNames:
+            return "joint"
+        else:
+            for jn in jointNames:
+                try:
+                    if n in _hpp.robot.getLinkNames(jn):
+                        return "link"
+                except hpp.Error:
+                    pass
+        return "unknown"
+
     def addOperationalFrame (self, req):
         # TODO check that frame exists
         n = "op_frame/" + req.value
-        self.topics.append (self.Topic (self._readJointPosition, n, Transform, data = req.value))
-        self.topics[-1].init(self._hpp())
-        rospy.loginfo("Add topic " + n)
-        return SetStringResponse(True)
+        frameType = self._getFrameType (req.value)
+        ok = False
+        if frameType == "joint":
+            self.topics.append (self.Topic (self._readJointPosition, n, Transform, data = req.value))
+            ok=True
+        elif frameType == "link":
+            self.topics.append (self.Topic (self._readLinkPosition, n, Transform, data = req.value))
+            ok = True
+        if ok:
+            self.topics[-1].init(self._hpp())
+            rospy.loginfo("Add topic " + n + " " + frameType)
+            return SetStringResponse(True)
+        else:
+            rospy.logerr("Could not add operational frame " + req.value)
+            return SetStringResponse(False)
 
     def addOperationalFrameVelocity (self, req):
         # TODO check that frame exists
         n = "velocity/op_frame/" + req.value
-        self.topics.append (self.Topic (self._readJointVelocity, n, Vector, data = req.value))
-        self.topics[-1].init(self._hpp())
-        rospy.loginfo("Add topic " + n)
-        return SetStringResponse(True)
+        frameType = self._getFrameType (req.value)
+        ok = False
+        if frameType == "joint":
+            self.topics.append (self.Topic (self._readJointVelocity, n, Vector, data = req.value))
+            ok=True
+        elif frameType == "link":
+            self.topics.append (self.Topic (self._readLinkVelocity, n, Vector, data = req.value))
+            ok=True
+        if ok:
+            self.topics[-1].init(self._hpp())
+            rospy.loginfo("Add topic " + n + " " + frameType)
+            return SetStringResponse(True)
+        else:
+            rospy.logerr("Could not add operational frame " + req.value)
+            return SetStringResponse(False)
 
     def setJointNames (self, req):
         try:
@@ -326,6 +362,14 @@ class HppOutputQueue(HppClient):
         t = client.robot.getJointVelocityInLocalFrame(data)
         return Vector(t)
 
+    def _readLinkPosition (self, client, data):
+        t = client.robot.getLinkPosition(data)
+        return listToTransform(t)
+
+    def _readLinkVelocity (self, client, data):
+        rospy.logerr ("Link velocity cannot be obtained from HPP")
+        return Vector()
+
     def readAt (self, pathId, time, uv = False, timeShift = 0):
         hpp = self._hpp()
         hpp.robot.setCurrentConfig( hpp.problem.configAtParam (pathId, time))
@@ -372,7 +416,7 @@ class HppOutputQueue(HppClient):
         self.firstMsgs = None
         for t, uv in zip(times, updateViewer):
             msgs = self.readAt(pathId, t, uv, timeShift = start)
-            if self.firstMsgs is not None: self.firstMsgs = msgs
+            if self.firstMsgs is None: self.firstMsgs = msgs
         self.pubs["read_path_done"].publish(UInt32(pathId))
         rospy.loginfo("Finish reading path {}".format(pathId))
         self.reading = False
@@ -391,6 +435,8 @@ class HppOutputQueue(HppClient):
             for topic, msg in zip(self.topics, self.firstMsgs):
                 topic.publish (msg)
             self.firstMsgs = None
+        else:
+            rospy.logerr("Could not print first message")
         return std_srvs.srv.EmptyResponse()
 
     def publish(self, empty):
