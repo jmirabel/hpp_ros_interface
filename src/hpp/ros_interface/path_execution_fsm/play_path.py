@@ -55,8 +55,7 @@ class InitializePath(smach.State):
 
         self.hppclient.manip.graph.selectGraph (transitionId[1])
         self.targetPub["read_subpath"].publish (ReadSubPath (userdata.pathId, start, length))
-        rospy.loginfo("Start reading subpath. Waiting for one second.")
-        rospy.sleep(1)
+        rospy.loginfo("Start reading subpath.")
         return _outcomes[2]
 
 class PlayPath (smach.State):
@@ -120,28 +119,37 @@ class PlayPath (smach.State):
     def handleControlNormChanged (self, msg):
         self.control_norm_ok = msg.data < 1e-2
 
-    def execute(self, userdata):
-        rate = rospy.Rate (1000)
-
-        wait_if_step_by_step ("Beginning execution.", 3)
-
-        # TODO Check that there the current SOT and the future SOT are compatible ?
-        rospy.loginfo("Run pre-action")
-        self.serviceProxies["hpp"]["target"]["publish_first"]()
-        status = self.serviceProxies['sot']['run_pre_action'](userdata.transitionId[0], userdata.transitionId[1])
-
-        rospy.sleep(0.5)
+    def _wait_for_control_norm_changed (self, rate, time_before_control_norm_changed):
+        # rospy.sleep(time_before_control_norm_changed)
+        try:
+            rospy.wait_for_message("/sot_hpp/control_norm_changed", Float64, time_before_control_norm_changed)
+        except rospy.ROSException:
+            pass
         rospy.loginfo("Wait for event on /sot_hpp/control_norm_changed")
         while not self.control_norm_ok:
             rate.sleep()
 
-        wait_if_step_by_step ("Pre-action ended.", 2)
+    def execute(self, userdata):
+        rate = rospy.Rate (1000)
+        time_before_control_norm_changed = 1.
+
+        wait_if_step_by_step ("Beginning execution.", 3)
+
+        # TODO Check that there the current SOT and the future SOT are compatible ?
+        self.serviceProxies['sot']['clear_queues']()
+        status = self.serviceProxies['sot']['run_pre_action'](userdata.transitionId[0], userdata.transitionId[1])
+        if status.success:
+            rospy.loginfo("Run pre-action")
+            self.serviceProxies["hpp"]["target"]["publish_first"]()
+            self.serviceProxies['sot']['read_queue'](10)
+
+            self._wait_for_control_norm_changed (rate, time_before_control_norm_changed)
+            wait_if_step_by_step ("Pre-action ended.", 2)
 
         rospy.loginfo("Publishing path")
         self.done = False
         self.serviceProxies['sot']['clear_queues']()
         self.targetPub["publish"].publish()
-        rospy.sleep(1)
 
         status = self.serviceProxies['sot']['plug_sot'](userdata.transitionId[0], userdata.transitionId[1])
         if not status.success:
@@ -168,25 +176,18 @@ class PlayPath (smach.State):
         # Sometimes, the function triggering /sot_hpp/control_norm_changed is a little slow to update
         # and the movement is skipped
         # This won't be a problem when we have a better mean of detecting the end of a movement
-        rospy.sleep(1)
-
-        rospy.loginfo("Wait for event on /sot_hpp/control_norm_changed")
-        while not self.control_norm_ok:
-            rate.sleep()
+        self._wait_for_control_norm_changed (rate, time_before_control_norm_changed)
         self.serviceProxies['sot']['stop_reading_queue']()
-        
+
         wait_if_step_by_step ("Action ended.", 2)
 
         # Run post action if any
         rospy.loginfo("Run post-action")
         status = self.serviceProxies['sot']['run_post_action'](userdata.endStateId[0], userdata.endStateId[1])
-        rospy.sleep(1)
-                 
-        rospy.loginfo("Wait for event on /sot_hpp/control_norm_changed")
-        while not self.control_norm_ok:
-            rate.sleep()
 
-        wait_if_step_by_step ("Post-action ended.", 2)
+        if status.success:
+            self._wait_for_control_norm_changed (rate, time_before_control_norm_changed)
+            wait_if_step_by_step ("Post-action ended.", 2)
 
         return _outcomes[0]
 
