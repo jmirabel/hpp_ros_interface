@@ -149,6 +149,20 @@ class HppOutputQueue(HppClient):
 
         def publish (self, msg):
             self.pub.publish(msg)
+    class ConstantTopic (object):
+        def __init__ (self, value, topicPub, MsgType):
+            self.pub = rospy.Publisher("/hpp/target/" + topicPub, MsgType, latch=False, queue_size=1000)
+            self.msg = value
+
+        def init (self, hpp):
+            pass
+
+        def read (self, hpp):
+            return None
+
+        def publish (self, msg):
+            assert msg==None
+            self.pub.publish(self.msg)
     class SentToViewer (object):
         def __init__ (self, parent):
             self.parent = parent
@@ -228,55 +242,67 @@ class HppOutputQueue(HppClient):
 
     def _getFrameType (self, n):
         _hpp = self._hpp()
-        jointNames = _hpp.robot.getAllJointNames()
-        if n in jointNames:
+        try:
+            _hpp.robot.getJointPosition (n)
             return "joint"
-        else:
-            for jn in jointNames:
-                try:
-                    if n in _hpp.robot.getLinkNames(jn):
-                        return "link"
-                except hpp.Error:
-                    pass
-        return "unknown"
+        # except hpp.Error:
+        except:
+            pass
+        try:
+            _hpp.robot.getLinkPosition (n)
+            return "link"
+        # except hpp.Error:
+        except:
+            pass
+        try:
+            _hpp.obstacle.getObstaclePosition (n)
+            return "obstacle"
+        # except hpp.Error:
+        except:
+            pass
+        raise ValueError ("Unknown operational frame type of " + n)
 
     def addOperationalFrame (self, req):
         # TODO check that frame exists
         n = "op_frame/" + req.value
-        frameType = self._getFrameType (req.value)
-        ok = False
+        try:
+            frameType = self._getFrameType (req.value)
+        except ValueError as e:
+            rospy.logerr("Could not add operational frame: " + str(e))
+            return SetStringResponse(False)
         if frameType == "joint":
             self.topics.append (self.Topic (self._readJointPosition, n, Transform, data = req.value))
-            ok=True
         elif frameType == "link":
             self.topics.append (self.Topic (self._readLinkPosition, n, Transform, data = req.value))
-            ok = True
-        if ok:
-            self.topics[-1].init(self._hpp())
-            rospy.loginfo("Add topic " + n + " " + frameType)
-            return SetStringResponse(True)
-        else:
-            rospy.logerr("Could not add operational frame " + req.value)
-            return SetStringResponse(False)
+        elif frameType == "obstacle":
+            # TODO There should be a way for the node who requests this
+            # to know the value is constant.
+            _hpp = self._hpp()
+            pos = _hpp.obstacle.getObstaclePosition (req.value)
+            self.topics.append (self.ConstantTopic (listToTransform(pos), n, Transform))
+        self.topics[-1].init(self._hpp())
+        rospy.loginfo("Add topic " + n + " " + frameType)
+        return SetStringResponse(True)
 
     def addOperationalFrameVelocity (self, req):
         # TODO check that frame exists
         n = "velocity/op_frame/" + req.value
-        frameType = self._getFrameType (req.value)
-        ok = False
+        try:
+            frameType = self._getFrameType (req.value)
+        except ValueError as e:
+            rospy.logerr("Could not add operational frame: " + str(e))
+            return SetStringResponse(False)
         if frameType == "joint":
             self.topics.append (self.Topic (self._readJointVelocity, n, Vector, data = req.value))
-            ok=True
         elif frameType == "link":
             self.topics.append (self.Topic (self._readLinkVelocity, n, Vector, data = req.value))
-            ok=True
-        if ok:
-            self.topics[-1].init(self._hpp())
-            rospy.loginfo("Add topic " + n + " " + frameType)
-            return SetStringResponse(True)
-        else:
-            rospy.logerr("Could not add operational frame " + req.value)
-            return SetStringResponse(False)
+        elif frameType == "obstacle":
+            # TODO There should be a way for the node who requests this
+            # to know the value is constant.
+            self.topics.append (self.ConstantTopic ([0,0,0,0,0,0], n, Vector))
+        self.topics[-1].init(self._hpp())
+        rospy.loginfo("Add topic " + n + " " + frameType)
+        return SetStringResponse(True)
 
     def setJointNames (self, req):
         try:
