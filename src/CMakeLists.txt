@@ -26,3 +26,11 @@ SET (PYTHON_FILE
 FOREACH(F ${PYTHON_FILE})
   PYTHON_INSTALL_ON_SITE("hpp/ros_interface/path_execution_fsm" ${F})
 ENDFOREACH()
+
+SET (PYTHON_FILE
+    supervision.py
+    __init__.py)
+
+FOREACH(F ${PYTHON_FILE})
+  PYTHON_INSTALL_ON_SITE("rqt_agimus" ${F})
+ENDFOREACH()

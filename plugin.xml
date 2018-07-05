@@ -1,0 +1,14 @@
+<library path="src">
+  <class name="Agimus supervision"
+	 type="rqt_agimus.supervision.Supervision"
+	 base_class_type="rqt_gui_py::Plugin">
+    <description>
+      A Python GUI plugin to supervise Agimus
+    </description>
+    <qtgui>
+      <label>Agimus supervision</label>
+      <icon type="theme">applications-python</icon>
+      <statustip>Open a GUI to supervise Agimus.</statustip>
+    </qtgui>
+  </class>
+</library>

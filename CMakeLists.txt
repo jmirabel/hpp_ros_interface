@@ -46,9 +46,13 @@ ADD_OPTIONAL_DEPENDENCY("dynamic_graph_bridge_msgs")
 
 ADD_SUBDIRECTORY(src)
 
+INSTALL(FILES plugin.xml
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+
 INSTALL(PROGRAMS
   scripts/hpp_node.py
   scripts/path_execution_fsm.py
+  scripts/rqt_agimus_supervision
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/scripts)
 INSTALL(DIRECTORY launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
