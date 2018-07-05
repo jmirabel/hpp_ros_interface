@@ -24,6 +24,9 @@ class Supervision(Plugin):
         # Give QObjects reasonable names
         self.setObjectName('Supervision')
 
+        while not rospy.has_param(Supervision.StepByStepParam):
+            rospy.sleep(0.1)
+
         self.step_publisher = rospy.Publisher (Supervision.StepTopic, EmptyMsg, queue_size=1)
         self.path_execution_publisher = rospy.Publisher (Supervision.PathExecutionTopic, UInt32, queue_size=1)
 
