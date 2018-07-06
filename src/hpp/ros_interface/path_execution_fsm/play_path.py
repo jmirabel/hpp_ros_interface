@@ -177,7 +177,7 @@ class PlayPath (smach.State):
         # and the movement is skipped
         # This won't be a problem when we have a better mean of detecting the end of a movement
         self._wait_for_control_norm_changed (rate, time_before_control_norm_changed)
-        self.serviceProxies['sot']['stop_reading_queue']()
+        # self.serviceProxies['sot']['stop_reading_queue']()
 
         wait_if_step_by_step ("Action ended.", 2)
 
